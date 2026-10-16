@@ -1,169 +1,148 @@
 (() => {
   'use strict';
-  const { PRODUCTS, configured, db, formatMoney, formatDate, escapeHtml } = window.Store;
+  const { configured, db, money, date, esc, productColumns } = window.Store;
   const $ = id => document.getElementById(id);
-  let api;
-  let orders = [];
-  let adminUserId = null;
-  const STATUS = { pendiente: 'Pendiente', verificado: 'Pago verificado', entregado: 'Entregado', rechazado: 'Rechazado' };
-  const display = (id, visible) => $(id).classList.toggle('hidden', !visible);
-  const message = (id, msg) => $(id).textContent = msg;
-  const busy = (btn, flag) => { if (btn) btn.disabled = flag; };
-  function resetPanel() { adminUserId = null; orders = []; display('admin-dashboard', false); display('admin-login', true); }
-  async function checkAdmin(user) {
+  const STATUSES = { pendiente:'Pendiente', verificado:'Verificado', entregado:'Entregado', rechazado:'Rechazado' };
+  let api, orders = [], products = [], activeTab = 'orders', editing = null;
+  const info = (id, msg) => { $(id).textContent = msg || ''; };
+  const show = (id, yes) => { $(id).hidden = !yes; };
+  const busy = (id, yes) => { $(id).disabled = yes; };
+  const error = msg => info('admin-error', msg);
+  const isAdmin = async user => {
     if (!user) return false;
-    const { data, error } = await api.from('shop_admins').select('user_id').eq('user_id', user.id).maybeSingle();
+    const { data, error } = await api.from('shop_admins').select('user_id').eq('user_id',user.id).maybeSingle();
     if (error) throw error;
-    return Boolean(data?.user_id === user.id);
-  }
-  async function begin() {
-    if (!configured) { display('admin-config', true); return; }
+    return data?.user_id === user.id;
+  };
+  function reset() { orders = []; products = []; show('admin-dashboard',false); show('admin-login',true); show('logout-btn',false); }
+  async function startup() {
+    if (!configured) { show('admin-config',true); return; }
     try {
       api = db();
-      const { data: sessionData, error: sessionError } = await api.auth.getSession();
-      if (sessionError) throw sessionError;
-      if (!sessionData.session?.user) { resetPanel(); return; }
       const { data, error } = await api.auth.getUser();
-      if (error) throw error;
-      if (!(await checkAdmin(data.user))) {
-        await api.auth.signOut();
-        resetPanel();
-        message('login-msg', 'Esta cuenta no figura como administradora. Agregá su ID en shop_admins desde Supabase.');
-        return;
-      }
-      adminUserId = data.user.id;
-      display('admin-login', false);
-      display('admin-dashboard', true);
-      await loadOrders();
-    } catch (error) {
-      resetPanel();
-      message('login-msg', 'Error al conectar: ' + (error.message || 'revisá la configuración de Supabase.'));
-    }
+      if (error && error.code !== 'session_not_found' && error.name !== 'AuthSessionMissingError') throw error;
+      if (!data?.user) { reset(); return; }
+      if (!(await isAdmin(data.user))) { await api.auth.signOut(); reset(); info('login-msg','Acceso no autorizado.'); return; }
+      showDashboard(); await refreshAll();
+    } catch (e) { reset(); info('login-msg',e.message || 'No se pudo conectar.'); }
   }
-  $('login-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const btn = $('login-btn'); busy(btn, true);
-    message('login-msg', '');
-    try {
-      if (!api) api = db();
-      const email = $('admin-email').value.trim();
-      const password = $('admin-password').value;
-      const { data, error } = await api.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      if (!(await checkAdmin(data.user))) {
-        await api.auth.signOut();
-        throw new Error('Acceso denegado: tu usuario no está habilitado en shop_admins.');
-      }
-      $('admin-password').value = '';
-      adminUserId = data.user.id;
-      display('admin-login', false); display('admin-dashboard', true);
-      await loadOrders();
-    } catch (error) { message('login-msg', error.message || 'No se pudo iniciar sesión.'); }
-    finally { busy(btn, false); }
+  function showDashboard() { show('admin-login',false); show('admin-config',false); show('admin-dashboard',true); show('logout-btn',true); }
+  $('login-form').addEventListener('submit',async e => {
+    e.preventDefault(); busy('login-btn',true); info('login-msg','');
+    try { api ||= db(); const {data,error:e2} = await api.auth.signInWithPassword({email:$('admin-email').value.trim(),password:$('admin-password').value}); if(e2)throw e2;
+      if (!(await isAdmin(data.user))) { await api.auth.signOut(); throw new Error('Esta cuenta no es administradora.'); }
+      $('admin-password').value = ''; showDashboard(); await refreshAll();
+    } catch(e2){info('login-msg',e2.message || 'No se pudo ingresar.');} finally { busy('login-btn',false); }
   });
-  $('logout-btn').addEventListener('click', async () => { await api.auth.signOut(); resetPanel(); });
-  $('refresh-btn').addEventListener('click', loadOrders);
-  $('search-orders').addEventListener('input', render);
-  $('filter-status').addEventListener('change', render);
+  $('logout-btn').addEventListener('click',async () => { if (api) await api.auth.signOut(); reset(); });
+  async function refreshAll() { await Promise.all([loadOrders(), loadProducts()]); }
+  $('refresh-btn').addEventListener('click',refreshAll);
   async function loadOrders() {
-    if (!adminUserId) return;
-    message('panel-message', '');
-    $('orders-list').innerHTML = '<div class="loader">Cargando pedidos…</div>';
-    try {
-      const { data, error } = await api.from('shop_orders').select('*').order('created_at', { ascending: false }).limit(500);
-      if (error) throw error;
-      orders = data || [];
-      render();
-    } catch (error) {
-      $('orders-list').innerHTML = '';
-      message('panel-message', 'No se pudieron cargar los pedidos: ' + error.message);
-    }
+    error('');
+    try { const {data,error:e} = await api.from('shop_orders').select('*').order('created_at',{ascending:false}).limit(500);
+      if(e)throw e; orders=data || []; $('orders-total').textContent=orders.length; renderOrders();
+    } catch(e){error('Pedidos: '+e.message);}
   }
-  function commands(order, rows) {
-    const nick = /^[A-Za-z0-9_]{3,16}$/.test(order.nickname) ? order.nickname : 'NICK';
-    if (order.product_code === 'vip') return `lp user ${nick} parent addtemp vip 30d`;
-    if (order.product_code === 'vipplus') return `lp user ${nick} parent addtemp vipplus 30d`;
-    const product = PRODUCTS[order.product_code];
-    if (!product) return 'Producto no reconocido. Verificá la compra.';
-    return `lp user ${nick} permission settemp backpack.size.${rows} true ${product.days}d replace`;
+  async function loadProducts() {
+    error('');
+    try { const {data,error:e} = await api.from('shop_products').select(productColumns).order('display_order',{ascending:true}).order('name',{ascending:true});
+      if(e)throw e; products=data||[]; $('products-total').textContent=products.length; renderProducts();
+    } catch(e){error('Catálogo: '+e.message);}
   }
-  function render() {
-    const search = $('search-orders').value.trim().toLowerCase();
-    const filter = $('filter-status').value;
-    const visible = orders.filter(o => (filter === 'todos' || o.status === filter) &&
-      [o.nickname, o.order_code, o.discord, o.transfer_reference, o.product_code].some(v => String(v || '').toLowerCase().includes(search)));
-    $('stat-all').textContent = orders.length;
-    $('stat-pending').textContent = orders.filter(o => o.status === 'pendiente').length;
-    $('stat-verified').textContent = orders.filter(o => o.status === 'verificado').length;
-    $('stat-delivered').textContent = orders.filter(o => o.status === 'entregado').length;
-    if (!visible.length) { $('orders-list').innerHTML = '<div class="empty-state">No se encontraron pedidos para este filtro.</div>'; return; }
-    const html = visible.map(order => {
-      const p = PRODUCTS[order.product_code];
-      const state = STATUS[order.status] || 'Desconocido';
-      const isBag = p?.kind === 'backpack';
-      const total = Number(order.total_ars || 0);
-      const escapedId = escapeHtml(order.id);
-      const span = (name, value) => `<div><small>${name}</small><strong>${escapeHtml(value)}</strong></div>`;
-      return `<article class="order-item" data-id="${escapedId}">
-        <div class="item-head"><div><h3>${escapeHtml(order.nickname)} · ${escapeHtml(p?.name || order.product_code)}</h3><small>${escapeHtml(order.order_code)} · ${escapeHtml(formatDate(order.created_at))}</small></div><span class="status-label ${escapeHtml(order.status)}">${escapeHtml(state)}</span></div>
-        <div class="item-details">
-          ${span('TOTAL DECLARADO POR CATÁLOGO', formatMoney(total))}
-          ${span('CANTIDAD', `${order.quantity} ${isBag ? 'fila(s)' : 'rango'}`)}
-          ${span('VIGENCIA', p?.duration || '—')}
-          ${span('DISCORD', order.discord || 'No informado')}
-          ${span('OPERACIÓN INFORMADA', order.transfer_reference || 'No informada')}
-        </div>
-        <label style="display:block;font-size:11px;color:#aea4c3" for="note-${escapedId}">Nota interna (solo administradores)</label>
-        <input id="note-${escapedId}" class="admin-note-input" type="text" maxlength="500" value="${escapeHtml(order.admin_note || '')}" placeholder="Ej: confirmada transferencia / entregado desde consola">
-        <div class="command-area"><small>Comando sugerido para la consola (NO se ejecuta desde esta web)</small>
-          ${isBag ? `<label for="rows-${escapedId}" style="font-size:11px;color:#c5b2e6">Total de filas al entregar (revisá las filas activas del jugador):</label><select class="row-select" style="max-width:190px;height:36px;margin:7px 0 10px" id="rows-${escapedId}"><option value="3" ${2 + order.quantity === 3 ? 'selected' : ''}>3 filas</option><option value="4" ${2 + order.quantity === 4 ? 'selected' : ''}>4 filas</option><option value="5" ${2 + order.quantity === 5 ? 'selected' : ''}>5 filas</option><option value="6" ${2 + order.quantity === 6 ? 'selected' : ''}>6 filas</option></select>` : ''}
-          <code class="command-value">${escapeHtml(commands(order, Math.min(6, 2 + Number(order.quantity))))}</code><button type="button" data-action="copy-command">Copiar comando</button>
-          ${isBag ? '<small style="margin-top:8px">Una compra posterior o una expiración puede alterar el total de filas; comprobá siempre los permisos actuales.</small>' : ''}
-        </div>
-        <div class="item-actions"><button data-action="save-note">Guardar nota</button><button data-action="verificado" class="confirm" ${order.status === 'verificado' || order.status === 'entregado' ? 'disabled' : ''}>✓ Marcar pago verificado</button><button data-action="entregado" class="complete" ${order.status !== 'verificado' ? 'disabled' : ''}>✓ Marcar entregado</button><button data-action="rechazado" class="danger" ${order.status === 'entregado' ? 'disabled' : ''}>✕ Rechazar</button></div>
-        </article>`;
-    }).join('');
-    $('orders-list').innerHTML = html;
+  document.querySelectorAll('[data-tab]').forEach(btn => btn.addEventListener('click', () => {
+    activeTab=btn.dataset.tab;
+    document.querySelectorAll('[data-tab]').forEach(b => { b.classList.toggle('active',b===btn); b.setAttribute('aria-selected',String(b===btn)); });
+    show('panel-orders',activeTab==='orders'); show('panel-products',activeTab==='products');
+  }));
+  $('status-filter').addEventListener('change',renderOrders);
+  $('search-orders').addEventListener('input',renderOrders);
+  const productByCode = code => products.find(p=>p.code===code);
+  function orderCommand(o,rows) {
+    const nick = o.nickname, days = Number(o.duration_days);
+    if (o.delivery_type === 'manual') return 'Entrega manual: no hay comando definido para este producto';
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(nick) || days < 1 || days > 3650) return 'Revisá los datos del pedido';
+    if (o.delivery_type === 'backpack') return `lp user ${nick} permission settemp backpack.size.${rows} true ${days}d replace`;
+    if (o.delivery_type === 'rank' && /^[a-z][a-z0-9_-]{0,31}$/.test(o.rank_group || '')) return `lp user ${nick} parent addtemp ${o.rank_group} ${days}d`;
+    return 'Entrega manual: no hay comando definido para este producto';
   }
-  $('orders-list').addEventListener('change', e => {
-    if (e.target.classList.contains('row-select')) {
-      const card = e.target.closest('.order-item');
-      const order = orders.find(o => o.id === card?.dataset.id);
-      if (order) card.querySelector('.command-value').textContent = commands(order, Number(e.target.value));
-    }
+  function renderOrders() {
+    $('stat-pending').textContent=orders.filter(o=>o.status==='pendiente').length;
+    $('stat-verified').textContent=orders.filter(o=>o.status==='verificado').length;
+    $('stat-delivered').textContent=orders.filter(o=>o.status==='entregado').length;
+    const term=$('search-orders').value.trim().toLowerCase(), status=$('status-filter').value;
+    const filtered=orders.filter(o => (status==='todos'||o.status===status) && (!term||[o.order_code,o.nickname,o.discord,o.transfer_reference,o.product_name].some(v=>String(v||'').toLowerCase().includes(term))));
+    $('orders-list').innerHTML=filtered.length ? filtered.map(o=> {
+      const bag = o.delivery_type==='backpack';
+      return `<article class="order-card" data-order="${esc(o.id)}"><div class="order-top"><div><span class="order-code">${esc(o.order_code)} · ${esc(date(o.created_at))}</span><h3>${esc(o.nickname)} <span>· ${esc(o.product_name || o.product_code)}</span></h3></div><span class="status-pill ${esc(o.status)}">${esc(STATUSES[o.status] || o.status)}</span></div>
+        <div class="order-info"><div><span>IMPORTE</span><strong>${money(o.total_ars)}</strong></div><div><span>CANTIDAD</span><strong>${Number(o.quantity)}</strong></div><div><span>DISCORD</span><strong>${esc(o.discord || '—')}</strong></div><div><span>REFERENCIA</span><strong>${esc(o.transfer_reference || '—')}</strong></div><div><span>DURACIÓN</span><strong>${o.duration_days ? `${Number(o.duration_days)} días` : 'Entrega única'}</strong></div></div>
+        <div class="command-box"><div class="command-head"><span>COMANDO SUGERIDO · COPIAR Y EJECUTAR EN CONSOLA</span>${bag ? `<label>Filas totales <select class="row-select"><option value="3" ${Number(o.quantity)+2===3?'selected':''}>3</option><option value="4" ${Number(o.quantity)+2===4?'selected':''}>4</option><option value="5" ${Number(o.quantity)+2===5?'selected':''}>5</option><option value="6" ${Number(o.quantity)+2===6?'selected':''}>6</option></select></label>`:''}</div><div class="command-line"><code>${esc(orderCommand(o,Math.min(6,Number(o.quantity)+2)))}</code><button type="button" data-action="copy" class="button button-secondary button-small">Copiar</button></div>${bag ? '<small>Comprobá las filas y vencimientos que ya tiene el jugador.</small>' : ''}</div>
+        <div class="order-note"><label>Nota interna</label><input class="note-value" maxlength="500" value="${esc(o.admin_note || '')}" placeholder="Notas de entrega o verificación"></div>
+        <div class="order-actions"><button type="button" class="button button-secondary button-small" data-action="save-note">Guardar nota</button><button type="button" class="button button-secondary button-small" data-action="verificado" ${o.status==='verificado'||o.status==='entregado'?'disabled':''}>Pago verificado</button><button type="button" class="button button-primary button-small" data-action="entregado" ${o.status!=='verificado'?'disabled':''}>Entregado</button><button type="button" class="button button-danger button-small" data-action="rechazado" ${o.status==='entregado'?'disabled':''}>Rechazar</button></div>
+      </article>`;
+    }).join('') : '<div class="empty-card">No hay pedidos para mostrar.</div>';
+  }
+  $('orders-list').addEventListener('change',e => {
+    if (!e.target.matches('.row-select')) return;
+    const card=e.target.closest('[data-order]'), o=orders.find(o=>o.id===card?.dataset.order);
+    if(o)card.querySelector('.command-line code').textContent=orderCommand(o,Number(e.target.value));
   });
-  $('orders-list').addEventListener('click', async e => {
-    const btn = e.target.closest('[data-action]'); if (!btn) return;
-    const card = btn.closest('.order-item'); const order = orders.find(o => o.id === card?.dataset.id);
-    if (!order) return;
-    const action = btn.dataset.action;
-    if (action === 'copy-command') {
-      const value = card.querySelector('.command-value').textContent;
-      try { await navigator.clipboard.writeText(value); btn.textContent = '✓ Copiado'; setTimeout(() => btn.textContent = 'Copiar comando', 1400); }
-      catch { window.prompt('Copiá este comando:', value); }
-      return;
-    }
-    if (!['save-note', 'verificado', 'entregado', 'rechazado'].includes(action)) return;
-    if (action === 'entregado' && order.status !== 'verificado') return;
-    if (['verificado', 'rechazado'].includes(action) && !window.confirm(action === 'verificado' ? '¿Confirmaste el pago en Mercado Pago?' : '¿Rechazar este pedido?')) return;
-    const note = card.querySelector('.admin-note-input').value.trim();
-    const payload = action === 'save-note' ? {admin_note: note} : {status: action, admin_note: note};
-    busy(btn, true);
-    message('panel-message', '');
-    try {
-      // El servidor también exige pertenecer a shop_admins gracias a RLS.
-      const {data, error} = await api.from('shop_orders').update(payload).eq('id', order.id).select('id,status,admin_note').single();
-      if (error) throw error;
-      order.status = data.status; order.admin_note = data.admin_note; render();
-    } catch(error) { message('panel-message', 'No se pudo actualizar el pedido: ' + error.message); busy(btn, false); }
+  $('orders-list').addEventListener('click',async e=>{
+    const btn=e.target.closest('[data-action]'); if(!btn)return;
+    const card=btn.closest('[data-order]'), o=orders.find(o=>o.id===card?.dataset.order); if(!o)return;
+    const action=btn.dataset.action;
+    if(action==='copy') { const value=card.querySelector('.command-line code').textContent; try { await navigator.clipboard.writeText(value); btn.textContent='Copiado ✓'; setTimeout(()=>btn.textContent='Copiar',1200); } catch {prompt('Copiar:',value);} return; }
+    if (action==='entregado' && o.status!=='verificado') return;
+    if (action==='verificado' && !confirm('¿Comprobaste el ingreso real del dinero en tu cuenta de Mercado Pago?'))return;
+    if (action==='rechazado' && !confirm('¿Rechazar este pedido?'))return;
+    const payload=action==='save-note'?{admin_note:card.querySelector('.note-value').value.trim()}:{status:action,admin_note:card.querySelector('.note-value').value.trim()};
+    btn.disabled=true;error('');
+    try { const {data,error:e2}=await api.from('shop_orders').update(payload).eq('id',o.id).select('status,admin_note').single();if(e2)throw e2;Object.assign(o,data);renderOrders(); }
+    catch(e2){error('No se pudo actualizar el pedido: '+e2.message);btn.disabled=false;}
   });
-  $('export-btn').addEventListener('click', () => {
-    const cols = ['order_code','created_at','nickname','discord','transfer_reference','product_code','quantity','total_ars','status','admin_note'];
-    const csv = [cols.join(';'), ...orders.map(o => cols.map(c => `"${String(o[c] ?? '').replace(/"/g, '""')}"`).join(';'))].join('\r\n');
-    const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = 'pedidos-survival-' + new Date().toISOString().slice(0,10) + '.csv'; link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 800);
+  function renderProducts() {
+    $('products-table').innerHTML=products.length ? products.map(p=>`<tr data-product="${esc(p.code)}"><td><div class="table-product"><span class="table-product-icon">${p.category==='rangos'?'✦':p.category==='mochilas'?'▦':'◇'}</span><div><strong>${esc(p.name)}</strong><small>${esc(p.code)}</small></div></div></td><td>${esc({rangos:'Rangos',mochilas:'Mochilas',otros:'Otros'}[p.category]||p.category)}</td><td class="table-price">${money(p.price_ars)}</td><td><span class="stock ${p.active?'on':'off'}">${p.active?'Visible':'Oculto'}</span></td><td><div class="table-actions"><button class="button button-secondary button-small" type="button" data-product-action="edit">Editar</button><button class="button button-secondary button-small" type="button" data-product-action="toggle">${p.active?'Ocultar':'Publicar'}</button></div></td></tr>`).join('') : '<tr><td colspan="5">No hay productos.</td></tr>';
+  }
+  $('products-table').addEventListener('click',async e=>{
+    const btn=e.target.closest('[data-product-action]');if(!btn)return;
+    const p=productByCode(btn.closest('[data-product]')?.dataset.product);if(!p)return;
+    if(btn.dataset.productAction==='edit')return openEditor(p);
+    if(!confirm(`¿${p.active?'Ocultar':'Publicar'} ${p.name}?`))return;
+    btn.disabled=true;error('');
+    try {const {error:e2}=await api.from('shop_products').update({active:!p.active}).eq('code',p.code);if(e2)throw e2;await loadProducts();}
+    catch(e2){error('No se pudo cambiar la visibilidad: '+e2.message);btn.disabled=false;}
   });
-  begin();
+  const fieldIds={code:'prod-code',name:'prod-name',description:'prod-description',category:'prod-category',price_ars:'prod-price',duration_days:'prod-days',max_quantity:'prod-max',badge:'prod-badge',display_order:'prod-order',delivery_type:'prod-delivery',rank_group:'prod-group'};
+  function openEditor(p) {
+    editing=p?.code||null; $('product-form').reset();
+    $('editor-title').textContent=p?'Editar producto':'Nuevo producto'; $('prod-code').disabled=Boolean(p);
+    for(const [key,id] of Object.entries(fieldIds))$(id).value=p?.[key]??({category:'otros',price_ars:500,max_quantity:1,display_order:100,delivery_type:'manual'}[key]??'');
+    $('prod-features').value=(p?.features||[]).join('\n');$('prod-active').checked=p?.active??true;info('editor-error','');
+    toggleRankField(); $('product-dialog').showModal();
+  }
+  const toggleRankField=()=>{const d=$('prod-delivery').value;show('rank-group-field',d==='rank');$('prod-group').required=d==='rank';$('prod-days').required=d!=='manual';};
+  $('prod-delivery').addEventListener('change',toggleRankField);
+  $('new-product-btn').addEventListener('click',()=>openEditor(null));
+  function closeEditor(){ $('product-dialog').close(); }
+  $('cancel-product').addEventListener('click',closeEditor);$('cancel-product-x').addEventListener('click',closeEditor);
+  $('product-form').addEventListener('submit',async e=>{
+    e.preventDefault();if(!$('product-form').reportValidity())return;
+    const features=$('prod-features').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const payload={};for(const [key,id] of Object.entries(fieldIds))payload[key]=$(id).value.trim();
+    for(const key of ['price_ars','max_quantity','display_order'])payload[key]=Number(payload[key]);
+    payload.duration_days=payload.duration_days?Number(payload.duration_days):null;
+    payload.active=$('prod-active').checked;payload.features=features;payload.rank_group=payload.delivery_type==='rank'?payload.rank_group:null;
+    if(features.length>6 || features.some(f=>f.length>110)){info('editor-error','Máximo 6 beneficios, de hasta 110 caracteres cada uno.');return;}
+    if(!payload.name || !Number.isInteger(payload.price_ars) || payload.price_ars<1){info('editor-error','Revisá nombre y precio.');return;}
+    if(editing) delete payload.code;
+    busy('save-product',true);info('editor-error','');
+    try {const req=editing?api.from('shop_products').update(payload).eq('code',editing):api.from('shop_products').insert(payload);
+      const {error:e2}=await req;if(e2)throw e2;closeEditor();await loadProducts();
+    }catch(e2){info('editor-error','No se pudo guardar: '+e2.message);}finally{busy('save-product',false);}
+  });
+  $('export-btn').addEventListener('click',()=>{
+    const cols=['order_code','created_at','nickname','discord','transfer_reference','product_code','product_name','quantity','unit_price_ars','total_ars','duration_days','status','admin_note'];
+    const data=[cols.join(';'),...orders.map(o=>cols.map(key=>'"'+String(o[key]??'').replace(/"/g,'""')+'"').join(';'))].join('\r\n');
+    const blob=new Blob(['\ufeff'+data],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='pedidos-survival-'+new Date().toISOString().slice(0,10)+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),800);
+  });
+  startup();
 })();
