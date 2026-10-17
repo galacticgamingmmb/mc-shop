@@ -28,7 +28,22 @@
     <div class="checkout-top"><div><span class="section-kicker">CHECKOUT</span><h2>Finalizar pedido</h2></div><button type="button" id="close-checkout" class="text-button">Cerrar ×</button></div>
     <div class="checkout-columns"><div class="payment-column">
       <div class="summary-panel"><span class="field-kicker">TU SELECCIÓN</span><div class="selection-line"><strong id="checkout-name">—</strong><span id="checkout-duration">—</span></div><p id="checkout-description">—</p><label for="quantity" id="quantity-label">Cantidad</label><select id="quantity" aria-label="Cantidad"></select><div class="total-row"><span>Total a transferir</span><strong id="checkout-price">$0</strong></div></div>
-      <div class="alias-panel"><span class="field-kicker">MERCADO PAGO · TRANSFERENCIA</span><p class="alias-value" id="payment-alias">dev.cristianm.mp</p><button id="copy-alias" class="button button-secondary" type="button">Copiar alias <span>⧉</span></button><small>Verificá el titular antes de transferir.</small></div>
+      <div class="payment-card-section"><span class="field-kicker">DATOS DE TRANSFERENCIA</span>
+        <div class="payment-card" id="payment-card">
+          <div class="payment-card-inner">
+            <section class="payment-card-face payment-card-front" id="payment-card-front">
+              <span class="payment-card-chip" aria-hidden="true">▦</span><span class="payment-card-brand">SURVIVAL STORE <small>TRANSFERENCIA</small></span>
+              <div class="payment-card-front-copy"><strong>Click para revelar datos</strong><span>Alias · titular · CBU/CVU</span></div>
+              <button type="button" id="reveal-payment" class="payment-reveal-button">Revelar datos <span>↻</span></button>
+            </section>
+            <section class="payment-card-face payment-card-back" id="payment-card-back" aria-hidden="true" inert>
+              <div class="payment-card-back-head"><span>DATOS PARA TRANSFERIR</span><button type="button" id="hide-payment" class="payment-hide-button">Volver ↻</button></div>
+              <div id="payment-details" class="payment-details"><p class="payment-empty">Cargando datos de pago…</p></div>
+            </section>
+          </div>
+        </div>
+        <small class="payment-card-note">Verificá los datos del titular antes de transferir.</small>
+      </div>
     </div><div class="form-panel"><span class="field-kicker">DATOS DEL JUGADOR</span><form id="order-form" novalidate>
       <label for="nickname">Nick de Minecraft <span>*</span></label><input id="nickname" name="nickname" type="text" placeholder="Tu nick" pattern="[A-Za-z0-9_]{3,16}" maxlength="16" autocomplete="off" required>
       <label for="discord">Usuario de Discord <em>(opcional)</em></label><input id="discord" name="discord" type="text" maxlength="80" placeholder="usuario">

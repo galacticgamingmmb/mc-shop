@@ -3,7 +3,7 @@
   const { configured, db, money, date, esc, productColumns } = window.Store;
   const $ = id => document.getElementById(id);
   const STATUSES = { pendiente:'Pendiente', verificado:'Verificado', entregado:'Entregado', rechazado:'Rechazado' };
-  let api, orders = [], products = [], activeTab = 'orders', editing = null;
+  let api, orders = [], products = [], activeTab = 'orders', editing = null, paymentSettings = null;
   const info = (id, msg) => { $(id).textContent = msg || ''; };
   const show = (id, yes) => { $(id).hidden = !yes; };
   const busy = (id, yes) => { $(id).disabled = yes; };
@@ -35,7 +35,7 @@
     } catch(e2){info('login-msg',e2.message || 'No se pudo ingresar.');} finally { busy('login-btn',false); }
   });
   $('logout-btn').addEventListener('click',async () => { if (api) await api.auth.signOut(); reset(); });
-  async function refreshAll() { await Promise.all([loadOrders(), loadProducts()]); }
+  async function refreshAll() { await Promise.all([loadOrders(), loadProducts(), loadPaymentSettings()]); }
   $('refresh-btn').addEventListener('click',refreshAll);
   async function loadOrders() {
     error('');
@@ -52,7 +52,7 @@
   document.querySelectorAll('[data-tab]').forEach(btn => btn.addEventListener('click', () => {
     activeTab=btn.dataset.tab;
     document.querySelectorAll('[data-tab]').forEach(b => { b.classList.toggle('active',b===btn); b.setAttribute('aria-selected',String(b===btn)); });
-    show('panel-orders',activeTab==='orders'); show('panel-products',activeTab==='products');
+    show('panel-orders',activeTab==='orders'); show('panel-products',activeTab==='products'); show('panel-payment',activeTab==='payment');
   }));
   $('status-filter').addEventListener('change',renderOrders);
   $('search-orders').addEventListener('input',renderOrders);
@@ -99,6 +99,30 @@
     try { const {data,error:e2}=await api.from('shop_orders').update(payload).eq('id',o.id).select('status,admin_note').single();if(e2)throw e2;Object.assign(o,data);renderOrders(); }
     catch(e2){error('No se pudo actualizar el pedido: '+e2.message);btn.disabled=false;}
   });
+  async function loadPaymentSettings() {
+    info('payment-settings-message','');
+    try {
+      const {data,error:e}=await api.from('shop_payment_settings').select('id,account_holder,payment_alias,cbu_cvu,bank_name,wallet_name').eq('id',1).maybeSingle();
+      if(e) throw e;
+      paymentSettings=data || {id:1,account_holder:'',payment_alias:'dev.cristianm.mp',cbu_cvu:'',bank_name:'',wallet_name:''};
+      $('pay-holder').value=paymentSettings.account_holder || '';
+      $('pay-alias').value=paymentSettings.payment_alias ?? 'dev.cristianm.mp';
+      $('pay-cbu').value=paymentSettings.cbu_cvu || '';
+      $('pay-bank').value=paymentSettings.bank_name || '';
+      $('pay-wallet').value=paymentSettings.wallet_name || '';
+    } catch(e) { info('payment-settings-message','No se pudieron cargar los datos. Ejecutá MIGRAR-V2-A-V3.sql. Detalle: '+e.message); $('payment-settings-message').className='form-feedback error'; }
+  }
+  $('payment-settings-form').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const payload={account_holder:$('pay-holder').value.trim(),payment_alias:$('pay-alias').value.trim(),cbu_cvu:$('pay-cbu').value.trim(),bank_name:$('pay-bank').value.trim(),wallet_name:$('pay-wallet').value.trim()};
+    if(!payload.payment_alias && !payload.cbu_cvu){info('payment-settings-message','Ingresá al menos un alias o CBU/CVU.');$('payment-settings-message').className='form-feedback error';return;}
+    busy('save-payment-settings',true); info('payment-settings-message','Guardando…'); $('payment-settings-message').className='form-feedback';
+    try {
+      const {data,error:e2}=await api.from('shop_payment_settings').update(payload).eq('id',1).select('id,account_holder,payment_alias,cbu_cvu,bank_name,wallet_name').single();
+      if(e2) throw e2; paymentSettings=data; info('payment-settings-message','Datos guardados. Ya aparecen en la tienda.'); $('payment-settings-message').className='form-feedback success';
+    } catch(e2) { info('payment-settings-message','No se pudieron guardar los datos: '+e2.message); $('payment-settings-message').className='form-feedback error'; }
+    finally {busy('save-payment-settings',false);}
+  });
   function renderProducts() {
     $('products-table').innerHTML=products.length ? products.map(p=>`<tr data-product="${esc(p.code)}"><td><div class="table-product"><span class="table-product-icon">${p.category==='rangos'?'✦':p.category==='mochilas'?'▦':'◇'}</span><div><strong>${esc(p.name)}</strong><small>${esc(p.code)}</small></div></div></td><td>${esc({rangos:'Rangos',mochilas:'Mochilas',otros:'Otros'}[p.category]||p.category)}</td><td class="table-price">${money(p.price_ars)}</td><td><span class="stock ${p.active?'on':'off'}">${p.active?'Visible':'Oculto'}</span></td><td><div class="table-actions"><button class="button button-secondary button-small" type="button" data-product-action="edit">Editar</button><button class="button button-secondary button-small" type="button" data-product-action="toggle">${p.active?'Ocultar':'Publicar'}</button></div></td></tr>`).join('') : '<tr><td colspan="5">No hay productos.</td></tr>';
   }
@@ -131,7 +155,7 @@
     for(const key of ['price_ars','max_quantity','display_order'])payload[key]=Number(payload[key]);
     payload.duration_days=payload.duration_days?Number(payload.duration_days):null;
     payload.active=$('prod-active').checked;payload.features=features;payload.rank_group=payload.delivery_type==='rank'?payload.rank_group:null;
-    if(features.length>6 || features.some(f=>f.length>110)){info('editor-error','Máximo 6 beneficios, de hasta 110 caracteres cada uno.');return;}
+    if(features.length>30 || features.some(f=>f.length>110)){info('editor-error','Máximo 30 beneficios, de hasta 110 caracteres cada uno.');return;}
     if(!payload.name || !Number.isInteger(payload.price_ars) || payload.price_ars<1){info('editor-error','Revisá nombre y precio.');return;}
     if(editing) delete payload.code;
     busy('save-product',true);info('editor-error','');

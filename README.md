@@ -1,146 +1,104 @@
-# Survival Store: landing page + pedidos manuales
+# Survival Store — minimal dark / GitHub Pages
 
-**Sitio estático listo para GitHub Pages.** No requiere Node.js, hosting PHP ni servidor Minecraft conectado.
+Tienda estática para Minecraft Survival. Pagos por transferencia al alias `dev.cristianm.mp` y **entrega manual** desde la consola Minecraft. Sin Tebex, sin Node.js, sin servidor web propio.
 
-## Qué incluye
+## Contenido
 
-- `index.html`: landing page con filas de mochila y VIP / VIP+ en pesos argentinos.
-- `admin.html`: acceso privado por email/contraseña para ver pedidos, verificarlos, marcarlos entregados o rechazarlos, anotar notas internas, copiar comandos de consola y descargar CSV.
-- `config.js`: personalizá nombre, alias, Discord y los **dos datos públicos de Supabase**.
-- `styles.css`, `shared.js`, `app.js`, `admin.js`: diseño y funcionamiento.
-- `supabase.sql`: base de datos, precios calculados en SQL y permisos de acceso seguros (RLS).
-- `.nojekyll`: sitio estático directo para GitHub Pages.
+| Archivo | Uso |
+| --- | --- |
+| `index.html` | Landing minimalista: catálogo, filtros y formulario de compra |
+| `admin.html` | Panel privado: pedidos, precios y productos editables |
+| `styles.css`, `app.js`, `admin.js`, `shared.js` | Diseño y código de la tienda |
+| `config.js` | Nombre, alias, Supabase, Discord opcional |
+| `supabase.sql` | **Instalación nueva** de la base de datos |
+| `MIGRAR-V2-A-V3.sql` | Actualiza una tienda V2 existente: amplía beneficios y crea datos de pago editables |
+| `MIGRAR-DESDE-V1.sql` | Actualización desde el esquema antiguo V1 (conserva pedidos) |
+| `.nojekyll` | GitHub Pages sin procesamiento Jekyll |
 
-## Cómo funciona para el jugador
+## Instalación (tienda nueva)
 
-1. Entra a la landing, elige fila extra o rango.
-2. Va a la sección de compra, copia el alias **`dev.cristianm.mp`** y transfiere el importe exacto desde Mercado Pago (u otra cuenta que pueda transferir al alias).
-3. Informa su nick Minecraft, usuario de Discord (opcional) y número de operación (opcional), confirma que transfirió y envía el pedido.
-4. Recibe un código `SV-XXXXXXXXXX` de referencia. El formulario **no verifica ni cobra nada**: el pago real se hace en la app de Mercado Pago.
-5. Vos iniciás sesión en `admin.html`, revisás el pedido, comprobás en TU Mercado Pago que el dinero entró (importe, fecha, identificador) y recién ahí marcás "Pago verificado".
-6. Le otorgás el rango o tamaño de mochila desde la consola de Minecraft. Marcás "Entregado". Si algo falla, dejá una nota.
-
-**Los beneficios vencen según el permiso temporal aplicado manualmente en LuckPerms.** No hay cobros recurrentes ni renovación automática.
-
-## Paso 1: configurar Supabase (plan gratuito puede ser suficiente para empezar)
-
-1. Creá un proyecto en https://supabase.com/.
-2. En **SQL Editor**, pegá y ejecutá el archivo completo `supabase.sql`.
-3. En **Authentication > Users**, creá un usuario administrativo con tu email y contraseña segura (podés usar "Add user").
-4. Copiá el `User UID` de ese usuario y ejecutá en SQL Editor:
+1. Entrá a https://supabase.com y creá un proyecto.
+2. Abrí **SQL Editor** y ejecutá `supabase.sql` entero **una sola vez**.
+3. En **Authentication → Users**, creá un usuario administrador con correo y contraseña segura. Copiá su UUID y ejecutá por separado:
 
    ```sql
    insert into public.shop_admins (user_id)
-   values ('PEGAR-AQUI-UUID-REAL');
+   values ('PEGAR-UUID-REAL');
    ```
 
-   **Usá el UUID real de tu usuario**, no una dirección de correo ni el texto del ejemplo.
+4. En `config.js` completá `supabaseUrl` y `supabasePublishableKey` con la URL y la **publishable key** de ese proyecto. Podés editar `brand`, `paymentAlias` y `supportUrl`.
+5. Abrí la página y probá hacer un pedido. Abrí `admin.html` con tu cuenta autorizada para verlo, verificarlo o rechazarlo.
+6. Creá un repositorio de GitHub, subí **los archivos que están dentro de esta carpeta a la raíz del repositorio**. `index.html` tiene que quedar en la raíz.
+7. En **Settings → Pages → Build and deployment**, elegí **Deploy from a branch**, rama `main`, carpeta `/(root)`.
 
-5. En **Project Settings / Connect**, buscá **Project URL** y **Publishable key** (o la legacy `anon` key). En `config.js`:
+Links: `https://TUUSUARIO.github.io/TUREPO/` y `https://TUUSUARIO.github.io/TUREPO/admin.html`.
 
-   ```js
-   supabaseUrl: 'https://TU-PROYECTO.supabase.co',
-   supabasePublishableKey: 'sb_publishable_...',
-   ```
+> **Si ya usás la tienda V2:** hacé un backup y ejecutá `MIGRAR-V2-A-V3.sql` una sola vez antes de publicar estos archivos. Conserva productos, pedidos y administradores; agrega datos de transferencia editables y permite hasta 30 beneficios por producto. No ejecutes `supabase.sql` sobre una base existente. Si venís de la antigua V1, usá `MIGRAR-DESDE-V1.sql`.
 
-   Estos dos valores se pueden publicar. **NUNCA** pegues claves `service_role`, `sb_secret_...`, tu contraseña de admin ni credenciales de Mercado Pago en el repo ni en `config.js`.
+## Editar o añadir productos
 
-6. **Authentication > Providers > Email:** mantené un único usuario administrador y deshabilitá registros públicos si no los necesitás. Si tu proyecto requiere confirmar correos, confirmá el administrador en el Dashboard.
+1. Entrá en `admin.html` e iniciá sesión.
+2. Abrí la pestaña **Productos**.
+3. Tocá **Editar** para cambiar el precio, los días, texto, beneficios, orden, disponibilidad y demás datos, o **+ Nuevo producto** para crear uno.
+4. Tocá **Guardar producto**. Los cambios se reflejan al recargar la tienda pública (no tenés que volver a subir los archivos a GitHub).
+5. Tocá **Ocultar** cuando no quieras vender un ítem. No se borran los pedidos viejos.
 
-7. Probá con dos navegadores/dispositivos: en uno hacé un pedido de prueba; en el otro iniciá sesión en `admin.html`. El pedido debe aparecer. Rechazá luego el pedido de prueba.
+El **código interno** (por ejemplo, `vip` o `kit_inicial`) identifica al producto y no se puede cambiar después de crearlo. Las categorías son Rangos, Mochilas y Otros. Cada producto permite hasta 30 líneas de beneficios (máximo 110 caracteres por línea), precio, cantidad máxima por pedido y tipo de entrega. En la tienda se muestran seis inicialmente y se puede desplegar el resto. La duración en días es obligatoria para rangos y mochilas y opcional para artículos de entrega única:
 
-**Seguridad:** los visitantes solo pueden insertar pedidos. No pueden leer pedidos ajenos, consultar datos de jugadores, validar pagos ni darse beneficios. La seguridad se aplica en Supabase, no por ocultar la URL de `admin.html`. La clave publicable y el acceso al HTML son públicos. La base de datos calcula los precios por sí misma para que nadie cambie el total editando el navegador.
+- **Rango LuckPerms:** campo `grupo LuckPerms` (`vip`, `vipplus`…). El panel sugiere `lp user JUGADOR parent addtemp GRUPO DIASd`.
+- **Fila de mochila:** el panel sugiere `lp user JUGADOR permission settemp backpack.size.N true DIASd replace`. Elegí el tamaño total correcto al entregar; el panel **no conoce** los permisos activos de Minecraft.
+- **Manual / otro:** podés vender kits, cosméticos y otros productos; el panel registra pedidos pero no genera un comando universal. Indicá qué entregar en la descripción/beneficios y hacelo manualmente en la consola.
 
-**Limitación antispam:** el formulario público puede recibir pedidos falsos o repetidos. No entregues nada sin comprobar el pago. Si se vuelve un problema, añadí CAPTCHA o un endpoint con rate limiting.
+## Editar los datos de transferencia
 
-## Paso 2: publicar GRATIS en GitHub Pages
+1. Entrá a `admin.html` e iniciá sesión con tu usuario administrador.
+2. Abrí la pestaña **Pagos**.
+3. Editá nombre completo del titular, alias, CBU/CVU, banco y/o billetera virtual.
+4. Guardá. La tarjeta del checkout mostrará `Click para revelar datos` y girará para mostrar los datos cargados.
 
-1. Extraé el ZIP. Creá un repositorio de GitHub, por ejemplo `survival-store`.
-2. **Subí los archivos que están dentro de esta carpeta a la raíz del repositorio**, no el ZIP ni la carpeta contenedora. `index.html` debe quedar en la raíz.
-3. Confirmá que `config.js` tiene la URL y la clave publicable del proyecto de Supabase.
-4. En GitHub: **Settings > Pages > Build and deployment > Deploy from a branch**. Seleccioná `main` y `/(root)` y guardá.
-5. La tienda quedará en una URL como `https://USUARIO.github.io/survival-store/` y el panel en `https://USUARIO.github.io/survival-store/admin.html`.
-6. Si usás un dominio propio, configurá el dominio personalizado desde Pages.
+La información de transferencia se guarda en `shop_payment_settings`. Es pública para que los compradores puedan leerla; solo los usuarios de `shop_admins` pueden modificarla. La animación de giro es visual, no una medida de privacidad.
 
-La landing funciona sin compilación, sin `npm install` y sin configurar IP del servidor. Para una vista previa local podés usar VS Code + Live Server. **Sin Supabase configurado, se ve la landing pero el formulario queda deshabilitado** para evitar pedidos que nunca lleguen.
+**Importante:** el comando sugerido **no se ejecuta** al pulsar ningún botón; tenés que copiarlo y ejecutarlo vos. Los productos nuevos no crean automáticamente grupos, kits ni permisos en Minecraft. El vuelo VIP+ debe limitarse a las regiones permitidas y no a PvP.
 
-## Paso 3: preparar Minecraft (ejemplos orientativos)
+## Flujo de pago
 
-**Importante:** los comandos NO se ejecutan desde la web. Copialos y ejecutalos VOS en la consola de Minehost/Pterodactyl. Confirma los nodos según la versión exacta de cada plugin.
+1. Jugador elige un producto y presiona **Comprar**.
+2. Ve el precio y el alias `dev.cristianm.mp`.
+3. Transfiere desde Mercado Pago y completa nick/operación.
+4. El pedido entra como **Pendiente**.
+5. Comprobás **en tu propia cuenta Mercado Pago** que el dinero llegó y coincide con el pedido. Lo marcás **Pago verificado**.
+6. Le das el beneficio desde la consola del servidor y lo marcás **Entregado**.
 
-### Mochila: 2 filas gratis, hasta 6 en total
+No hay comprobación automática de transferencias. Un número de operación escrito por el jugador **no prueba el pago**. No hay cobro recurrente; los permisos temporales vencen por LuckPerms.
 
-Suponiendo Minepacks y LuckPerms:
+### Seguridad de datos y precios
 
-```text
+- El navegador utiliza una clave **pública** de Supabase. **Nunca** publiques claves `service_role`, `sb_secret_...`, claves de Mercado Pago, contraseñas o tokens privados.
+- Supabase tiene **RLS**: solo los administradores autorizados pueden cambiar productos, ver pedidos y modificar sus estados. Los visitantes pueden leer únicamente productos activos y **crear** pedidos.
+- Un trigger de Supabase calcula y guarda el precio por unidad, total, nombre, duración y tipo de entrega **en el momento del pedido**. Nadie puede autoaprobar un pago modificando HTML o JavaScript.
+- Al editar un producto, los pedidos antiguos **conservan** el importe original. Tené en cuenta que un comprador que dejó abierta la página puede ver un precio anterior; si cambiás precios, pedile que recargue antes de transferir.
+- El formulario sin Supabase configurado solo muestra la **vista previa** del catálogo; las compras quedan deshabilitadas. No promete guardar pedidos cuando no hay base de datos.
+- Recomendación: deshabilitá registros públicos en Supabase Auth si solo necesitás tu cuenta admin. Si aparecen pedidos falsos, agregá CAPTCHA/rate limiting mediante una función Edge.
+
+## Configuración básica de Minecraft
+
+```
 lp group default permission set backpack.use true
 lp group default permission set backpack.size.2 true
-```
-
-Cuando un jugador paga una fila adicional semanal y no tiene otras filas compradas:
-
-```text
-lp user Steve123 permission settemp backpack.size.3 true 7d replace
-```
-
-Si paga 2 filas mensuales y parte de 2:
-
-```text
-lp user Steve123 permission settemp backpack.size.4 true 30d replace
-```
-
-En el panel elegís **el tamaño total** (de 3 a 6 filas) antes de copiar el comando sugerido. Esto NO detecta por sí solo las filas activas ni renueva su duración: revisá permisos y vencimientos si el mismo jugador compra filas con distintos plazos o renueva antes de que expiren. No prometas que el plugin conservará accesibles los objetos de filas que vencen: probalo con una cuenta de prueba, y avisá a los jugadores antes del vencimiento para que liberen espacio.
-
-### Rangos VIP y VIP+
-
-```text
 lp creategroup vip
 lp creategroup vipplus
 lp group vipplus parent add vip
 ```
 
-**VIP** por 30 días:
+Ejemplos de entrega temporal para una cuenta llamada `Steve123`:
 
-```text
+```
+lp user Steve123 permission settemp backpack.size.3 true 7d replace
 lp user Steve123 parent addtemp vip 30d
 ```
 
-**VIP+** por 30 días:
+**Cuidado con las renovaciones:** `replace` no acumula por sí solo días restantes. Para agregar días a un permiso existente comprobado, LuckPerms ofrece `accumulate`. Si el jugador tiene varias filas compradas y plazos distintos, revisá manualmente sus permisos y fechas antes de entregar. Comprobá asimismo el comportamiento de objetos de la mochila cuando vence el tamaño extra.
 
-```text
-lp user Steve123 parent addtemp vipplus 30d
-```
+## Personalización visual
 
-Beneficios sugeridos (adaptar permisos exactos a tus plugins):
-
-| Beneficio | VIP | VIP+ |
-| --- | --- | --- |
-| Prefijo y color en chat | Sí | Sí |
-| Homes | 3 | 5 |
-| `/craft`, `/hat` | Sí | Sí |
-| Kit cada 7 días | Hierro básico | Hierro + consumibles |
-| Ender Chest y yunque remotos | — | Sí |
-| Vuelo | — | Solo áreas habilitadas, sin PvP |
-
-Kits sugeridos: **VIP:** espada y pico de hierro, 16 filetes, 32 antorchas, escudo. **VIP+:** herramientas de hierro, 32 filetes, 64 antorchas, escudo, 16 botellas de experiencia.
-
-Para implementar prefijos, sets de home, kits de 7 días y los comandos portátiles, configurá LuckPerms, EssentialsX y sus archivos `kits.yml`/permisos compatibles con tus versiones. **No habilites permiso global de `/fly` para VIP+**: requiere una configuración adicional por regiones y combate, o podría dar ventajas injustas. Mientras tanto, activá ese perk solo cuando tengas reglas técnicas que lo limiten.
-
-**Cuidado al renovar**: LuckPerms permite permisos temporales con distintas opciones de acumulación. Comprobá cómo se comporta `replace` antes de usarlo en una renovación; el panel no prorroga automáticamente vencimientos.
-
-## Cambiar precios
-
-`shared.js` contiene los precios visuales. `supabase.sql` contiene los precios **obligatorios** de la base de datos. Si cambiás los precios, actualizá ambos: modificar solo HTML/JavaScript haría que lo mostrado al comprador difiera de lo guardado. En Supabase, cambiar la expresión de una columna `GENERATED ALWAYS` puede requerir recrear la columna o migración SQL, y los cambios deberán probarse antes de publicar.
-
-## Problemas frecuentes
-
-- **La landing se ve pero no deja enviar**: faltan `supabaseUrl` o `supabasePublishableKey` en `config.js`.
-- **No aparece un pedido**: revisá `supabase.sql`, la URL/clave y los errores de Network/Console del navegador. No copies claves privadas.
-- **No puedo ingresar al admin**: revisá credenciales de Supabase Auth y si el UID figura en `shop_admins`.
-- **Error 42501 al insertar**: faltan los GRANT o políticas del SQL, o no se ejecutó el SQL completo.
-- **Le doy "Entregado" y no hace nada en MC**: correcto; la entrega siempre es manual desde la consola de Minecraft.
-- **Parece un pago aprobado porque enviaron formulario**: NO. Todos los pedidos entran como `pendiente` y nadie obtiene perks hasta que vos verifiques el pago real.
-
-## Nota sobre comisiones y privacidad
-
-No usás Tebex, pero Mercado Pago podría cobrar sus propias comisiones según el tipo de operación/cuenta. Validá las condiciones de tu cuenta. Los datos de nick, Discord y número de operación se almacenan en Supabase y se muestran únicamente a administradores habilitados. Publicá una política de privacidad adecuada si la comunidad crece; evitá pedir imágenes de DNI, contraseñas o códigos de seguridad.
+La tienda usa CSS local, sin compilación, con modo oscuro fijo. Podés cambiar `--primary` y otras variables en `styles.css`. El catálogo (textos, precios, badges, orden, productos nuevos y visibilidad) se administra desde `admin.html`.
